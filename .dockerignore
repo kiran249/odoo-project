@@ -1,0 +1,8 @@
+.git
+helm
+environments
+monitoring
+k8s
+Jenkinsfile
+*.md
+**/__pycache__

@@ -1,0 +1,18 @@
+{{- if .Values.odoo.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: odoo-data
+  labels:
+    {{- include "op.componentLabels" (list . "odoo") | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [{{ .Values.odoo.persistence.accessMode }}]
+  {{- with (.Values.odoo.persistence.storageClass | default .Values.storageClass) }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.odoo.persistence.size }}
+{{- end }}

@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: odoo
+  labels:
+    {{- include "op.componentLabels" (list . "odoo") | nindent 4 }}
+spec:
+  {{- if not .Values.odoo.autoscaling.enabled }}
+  replicas: {{ .Values.odoo.replicas }}
+  {{- end }}
+  {{- if and .Values.odoo.persistence.enabled (eq .Values.odoo.persistence.accessMode "ReadWriteOnce") }}
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "op.selector" (list . "odoo") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "op.componentLabels" (list . "odoo") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/odoo/configmap.yaml") . | sha256sum }}
+    spec:
+      securityContext:
+        fsGroup: 101   # odoo group in the official image
+      initContainers:
+        {{- include "op.odooConfigInit" . | nindent 8 }}
+      containers:
+        - name: odoo
+          image: "{{ .Values.odoo.image.repository }}:{{ .Values.odoo.image.tag }}"
+          imagePullPolicy: {{ .Values.odoo.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8069
+            - name: websocket
+              containerPort: 8072
+          env:
+            {{- include "op.odooEnv" . | nindent 12 }}
+          startupProbe:
+            httpGet: { path: /web/health, port: http }
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /web/health, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /web/health, port: http }
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.odoo.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/odoo
+            - name: data
+              mountPath: /var/lib/odoo
+      volumes:
+        - name: config-template
+          configMap:
+            name: odoo-config
+        - name: config
+          emptyDir: {}
+        - name: data
+          {{- if .Values.odoo.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: odoo-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}

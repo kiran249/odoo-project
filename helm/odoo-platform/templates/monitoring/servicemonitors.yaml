@@ -1,0 +1,101 @@
+{{- if include "op.monitoringEnabled" . }}
+{{- if .Values.postgres.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: postgres
+  labels:
+    {{- include "op.componentLabels" (list . "postgres") | nindent 4 }}
+    {{- include "op.monitoringLabels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "op.selector" (list . "postgres") | nindent 6 }}
+  endpoints:
+    - port: metrics
+      interval: 30s
+---
+{{- end }}
+{{- if .Values.minio.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: minio
+  labels:
+    {{- include "op.componentLabels" (list . "minio") | nindent 4 }}
+    {{- include "op.monitoringLabels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "op.selector" (list . "minio") | nindent 6 }}
+  endpoints:
+    - port: api
+      path: /minio/v2/metrics/cluster
+      interval: 60s
+    - port: api
+      path: /minio/v2/metrics/bucket
+      interval: 60s
+---
+{{- end }}
+{{- if .Values.keycloak.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: keycloak
+  labels:
+    {{- include "op.componentLabels" (list . "keycloak") | nindent 4 }}
+    {{- include "op.monitoringLabels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "op.selector" (list . "keycloak") | nindent 6 }}
+  endpoints:
+    - port: management
+      path: /metrics
+      interval: 30s
+---
+{{- end }}
+# Odoo has no native /metrics endpoint: it is checked end-to-end through the
+# blackbox exporter (HTTP 200 on /web/health), plus kube-state-metrics/cAdvisor.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: platform-health
+  labels:
+    {{- include "op.labels" . | nindent 4 }}
+    {{- include "op.monitoringLabels" . | nindent 4 }}
+spec:
+  interval: 30s
+  module: http_2xx
+  prober:
+    url: {{ .Values.monitoring.blackboxExporterUrl }}
+  targets:
+    staticConfig:
+      static:
+        - http://odoo.{{ .Release.Namespace }}.svc.cluster.local:8069/web/health
+      labels:
+        namespace: {{ .Release.Namespace }}
+        component: odoo
+{{- if .Values.keycloak.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: keycloak-health
+  labels:
+    {{- include "op.labels" . | nindent 4 }}
+    {{- include "op.monitoringLabels" . | nindent 4 }}
+spec:
+  interval: 30s
+  module: http_2xx
+  prober:
+    url: {{ .Values.monitoring.blackboxExporterUrl }}
+  targets:
+    staticConfig:
+      static:
+        - http://keycloak.{{ .Release.Namespace }}.svc.cluster.local:9000/health/ready
+      labels:
+        namespace: {{ .Release.Namespace }}
+        component: keycloak
+{{- end }}
+{{- end }}

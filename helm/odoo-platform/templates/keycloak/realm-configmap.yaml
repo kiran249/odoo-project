@@ -1,0 +1,14 @@
+{{- if .Values.keycloak.enabled }}
+# Imported on first start only (existing realms are left untouched).
+# ${ODOO_OIDC_CLIENT_SECRET}/${GRAFANA_OIDC_CLIENT_SECRET} are resolved by
+# Keycloak from the container environment at import time.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm
+  labels:
+    {{- include "op.componentLabels" (list . "keycloak") | nindent 4 }}
+data:
+  realm.json: |
+    {{- tpl (.Files.Get "files/keycloak-realm.json") . | nindent 4 }}
+{{- end }}

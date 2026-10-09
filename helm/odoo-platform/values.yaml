@@ -1,0 +1,151 @@
+# Default values for odoo-platform. Per-environment overrides live in
+# environments/<env>/values.yaml at the repository root.
+
+# Public hostnames (DNS records must point at the ALB created by the ingresses)
+domains:
+  odoo: odoo.example.com
+  keycloak: auth.example.com
+  minioConsole: minio.example.com
+
+# Secret created by the pipeline (scripts/create-secrets.sh); never commit values.
+# Expected keys: postgres-password, odoo-db-password, keycloak-db-password,
+# minio-root-user, minio-root-password, odoo-admin-password,
+# keycloak-admin-password, odoo-oidc-client-secret, grafana-oidc-client-secret
+existingSecret: odoo-platform-secrets
+
+# Name of the StorageClass for every PVC ("" = cluster default)
+storageClass: gp3
+
+ingress:
+  className: alb
+  # Shared by every ingress; all of them join the same ALB through group.name.
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/group.name: odoo-platform
+    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:REGION:ACCOUNT:certificate/ID
+  tls: true
+
+monitoring:
+  # Create ServiceMonitors / Probes / PrometheusRules / dashboards.
+  # Requires the Prometheus Operator CRDs (installed with kube-prometheus-stack).
+  enabled: true
+  # Labels the Prometheus/Grafana selectors look for
+  labels:
+    release: kube-prometheus-stack
+  blackboxExporterUrl: prometheus-blackbox-exporter.monitoring.svc:9115
+
+# ---------------------------------------------------------------------------
+postgres:
+  # Set to false to use an external database (e.g. Amazon RDS) instead.
+  enabled: true
+  image: public.ecr.aws/docker/library/postgres:16
+  storage: 20Gi
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { memory: 2Gi }
+  exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.17.1
+  # Settings appended to postgresql.conf
+  config: |
+    max_connections = 200
+    shared_buffers = 512MB
+    effective_cache_size = 1536MB
+    work_mem = 8MB
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"
+    bucket: odoo-backups
+    retentionDays: 14
+
+# Used only when postgres.enabled=false. Passwords still come from existingSecret
+# (odoo-db-password, keycloak-db-password); the users and databases must exist.
+externalDatabase:
+  host: ""
+  port: 5432
+
+databases:
+  odoo:
+    user: odoo
+    name: odoo
+  keycloak:
+    user: keycloak
+    name: keycloak
+
+# ---------------------------------------------------------------------------
+minio:
+  enabled: true
+  # MinIO no longer publishes community images: Jenkins builds
+  # docker/minio/Dockerfile and sets this to the ECR image it pushed.
+  # For production consider Amazon S3 instead (minio.enabled=false, odoo.s3.*).
+  image: minio-platform/minio:latest
+  storage: 50Gi
+  region: us-east-1
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits: { memory: 2Gi }
+  console:
+    ingress: true
+
+# ---------------------------------------------------------------------------
+keycloak:
+  enabled: true
+  image: quay.io/keycloak/keycloak:26.3
+  replicas: 1
+  realm: odoo
+  adminUser: admin
+  resources:
+    requests: { cpu: 250m, memory: 1Gi }
+    limits: { memory: 2Gi }
+  # Hostname of Grafana, used for the "grafana" client redirect URI
+  grafanaUrl: https://grafana.example.com
+
+# ---------------------------------------------------------------------------
+odoo:
+  image:
+    repository: odoo-platform/odoo   # overwritten by Jenkins with the ECR URI
+    tag: latest                      # overwritten by Jenkins
+    pullPolicy: IfNotPresent
+  replicas: 1
+  workers: 4
+  maxCronThreads: 1
+  # Extra lines for odoo.conf
+  extraConfig: |
+    limit_time_cpu = 600
+    limit_time_real = 1200
+    limit_memory_soft = 2147483648
+    limit_memory_hard = 2684354560
+  resources:
+    requests: { cpu: 500m, memory: 2Gi }
+    limits: { memory: 3Gi }
+  # Attachments live in MinIO, so pods are stateless. data_dir (sessions,
+  # cache) is an emptyDir unless persistence is enabled. Enable it with a
+  # ReadWriteMany class (e.g. EFS) to keep sessions across pod restarts.
+  persistence:
+    enabled: false
+    storageClass: ""
+    accessMode: ReadWriteMany
+    size: 10Gi
+  # Keep users on the same pod (sessions are per pod without shared storage)
+  stickySessions: true
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+  init:
+    # Installed on first deploy, and installed later if missing
+    installModules: base,web,auth_oidc,fs_attachment_s3
+    # Comma-separated modules to upgrade (-u) on this deploy (Jenkins parameter)
+    updateModules: ""
+  oidc:
+    clientId: odoo
+    buttonLabel: Log in with Keycloak
+    # b2b = invited users only, b2c = anyone in the realm gets a portal user
+    signupScope: b2b
+  s3:
+    bucket: odoo-attachments
+    # Only used when minio.enabled=false (e.g. https://s3.eu-west-1.amazonaws.com)
+    endpoint: ""

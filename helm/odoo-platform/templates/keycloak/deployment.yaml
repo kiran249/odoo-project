@@ -1,0 +1,79 @@
+{{- if .Values.keycloak.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  labels:
+    {{- include "op.componentLabels" (list . "keycloak") | nindent 4 }}
+spec:
+  replicas: {{ .Values.keycloak.replicas }}
+  selector:
+    matchLabels:
+      {{- include "op.selector" (list . "keycloak") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "op.componentLabels" (list . "keycloak") | nindent 8 }}
+      annotations:
+        checksum/realm: {{ include (print $.Template.BasePath "/keycloak/realm-configmap.yaml") . | sha256sum }}
+    spec:
+      containers:
+        - name: keycloak
+          image: {{ .Values.keycloak.image }}
+          args: ["start", "--import-realm"]
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: management
+              containerPort: 9000
+          env:
+            - name: KC_HOSTNAME
+              value: https://{{ .Values.domains.keycloak }}
+            # Lets in-cluster clients (Odoo, Grafana) use the Service URL for
+            # token/JWKS calls while tokens keep the public issuer.
+            - name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC
+              value: "true"
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            - name: KC_PROXY_HEADERS
+              value: xforwarded
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            - name: KC_METRICS_ENABLED
+              value: "true"
+            - name: KC_EVENT_METRICS_USER_ENABLED
+              value: "true"
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL
+              value: jdbc:postgresql://{{ include "op.dbHost" . }}:{{ include "op.dbPort" . }}/{{ .Values.databases.keycloak.name }}
+            - name: KC_DB_USERNAME
+              value: {{ .Values.databases.keycloak.user }}
+            {{- include "op.secretEnv" (list "KC_DB_PASSWORD" "keycloak-db-password" .) | nindent 12 }}
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              value: {{ .Values.keycloak.adminUser }}
+            {{- include "op.secretEnv" (list "KC_BOOTSTRAP_ADMIN_PASSWORD" "keycloak-admin-password" .) | nindent 12 }}
+            {{- include "op.secretEnv" (list "ODOO_OIDC_CLIENT_SECRET" "odoo-oidc-client-secret" .) | nindent 12 }}
+            {{- include "op.secretEnv" (list "GRAFANA_OIDC_CLIENT_SECRET" "grafana-oidc-client-secret" .) | nindent 12 }}
+          startupProbe:
+            httpGet: { path: /health/started, port: management }
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /health/ready, port: management }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health/live, port: management }
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.keycloak.resources | nindent 12 }}
+          volumeMounts:
+            - name: realm
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+      volumes:
+        - name: realm
+          configMap:
+            name: keycloak-realm
+{{- end }}

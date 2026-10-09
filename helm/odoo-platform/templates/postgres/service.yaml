@@ -1,0 +1,32 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    {{- include "op.componentLabels" (list . "postgres") | nindent 4 }}
+spec:
+  selector:
+    {{- include "op.selector" (list . "postgres") | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+    - name: metrics
+      port: 9187
+      targetPort: metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless
+  labels:
+    {{- include "op.componentLabels" (list . "postgres") | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "op.selector" (list . "postgres") | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+{{- end }}

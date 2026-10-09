@@ -1,0 +1,10 @@
+# auth_oidc
+python-jose[cryptography]
+# fs_storage / fs_attachment / fs_attachment_s3 (MinIO via S3 API)
+fsspec>=2025.3.0
+s3fs>=2025.3.0
+# boto3 for bucket creation and backups (resolved against s3fs's botocore pin)
+boto3
+python-slugify
+# Odoo needs it to check versioned external dependencies (fsspec>=...)
+packaging

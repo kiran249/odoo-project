@@ -1,0 +1,71 @@
+{
+  "realm": "{{ .Values.keycloak.realm }}",
+  "displayName": "Odoo Platform",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "bruteForceProtected": true,
+  "roles": {
+    "realm": [
+      { "name": "grafana-admin", "description": "Grafana Admin role" },
+      { "name": "grafana-editor", "description": "Grafana Editor role" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "{{ .Values.odoo.oidc.clientId }}",
+      "name": "Odoo",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${ODOO_OIDC_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "rootUrl": "https://{{ .Values.domains.odoo }}",
+      "baseUrl": "/web",
+      "redirectUris": ["https://{{ .Values.domains.odoo }}/auth_oauth/signin"],
+      "webOrigins": ["https://{{ .Values.domains.odoo }}"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://{{ .Values.domains.odoo }}/*"
+      }
+    },
+    {
+      "clientId": "grafana",
+      "name": "Grafana",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${GRAFANA_OIDC_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "rootUrl": "{{ .Values.keycloak.grafanaUrl }}",
+      "redirectUris": ["{{ .Values.keycloak.grafanaUrl }}/login/generic_oauth"],
+      "webOrigins": ["{{ .Values.keycloak.grafanaUrl }}"],
+      "attributes": {
+        "post.logout.redirect.uris": "{{ .Values.keycloak.grafanaUrl }}/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ]
+}

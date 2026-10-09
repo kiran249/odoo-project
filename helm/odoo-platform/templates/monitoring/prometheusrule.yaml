@@ -1,0 +1,87 @@
+{{- if include "op.monitoringEnabled" . }}
+{{- $ns := .Release.Namespace }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: odoo-platform
+  labels:
+    {{- include "op.labels" . | nindent 4 }}
+    {{- include "op.monitoringLabels" . | nindent 4 }}
+spec:
+  groups:
+    - name: odoo-platform.availability
+      rules:
+        - alert: OdooDown
+          expr: max(probe_success{namespace="{{ $ns }}", component="odoo"}) == 0
+          for: 3m
+          labels: { severity: critical }
+          annotations:
+            summary: Odoo health check failing in {{ $ns }}
+            description: /web/health has not returned 200 for 3 minutes.
+        - alert: OdooSlow
+          expr: avg(probe_duration_seconds{namespace="{{ $ns }}", component="odoo"}) > 3
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: Odoo responds slowly in {{ $ns }}
+            description: Health check latency has been above 3s for 10 minutes.
+        - alert: OdooReplicasUnavailable
+          expr: |
+            kube_deployment_status_replicas_available{namespace="{{ $ns }}", deployment="odoo"}
+              < kube_deployment_spec_replicas{namespace="{{ $ns }}", deployment="odoo"}
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: Not all Odoo replicas are available in {{ $ns }}
+        - alert: KeycloakDown
+          expr: max(probe_success{namespace="{{ $ns }}", component="keycloak"}) == 0
+          for: 3m
+          labels: { severity: critical }
+          annotations:
+            summary: Keycloak is not ready in {{ $ns }} (users cannot log in)
+        - alert: PostgresDown
+          # The exporter runs as a sidecar: either it cannot reach PostgreSQL
+          # (scrape error) or the whole pod is gone (target down).
+          expr: |
+            max(pg_exporter_last_scrape_error{namespace="{{ $ns }}"}) == 1
+              or max(up{namespace="{{ $ns }}", service="postgres"}) == 0
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: PostgreSQL is down in {{ $ns }}
+        - alert: PostgresConnectionsHigh
+          expr: |
+            sum(pg_stat_activity_count{namespace="{{ $ns }}"})
+              / max(pg_settings_max_connections{namespace="{{ $ns }}"}) > 0.8
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: PostgreSQL uses more than 80% of max_connections in {{ $ns }}
+        - alert: MinioDown
+          expr: max(up{namespace="{{ $ns }}", service="minio"}) == 0
+          for: 3m
+          labels: { severity: critical }
+          annotations:
+            summary: MinIO is down in {{ $ns }} (Odoo attachments unavailable)
+    - name: odoo-platform.storage-and-jobs
+      rules:
+        - alert: VolumeAlmostFull
+          expr: |
+            kubelet_volume_stats_available_bytes{namespace="{{ $ns }}"}
+              / kubelet_volume_stats_capacity_bytes{namespace="{{ $ns }}"} < 0.15
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "PVC {{ "{{ $labels.persistentvolumeclaim }}" }} is over 85% full"
+        - alert: OdooInitJobFailed
+          expr: kube_job_status_failed{namespace="{{ $ns }}", job_name="odoo-init"} > 0
+          labels: { severity: critical }
+          annotations:
+            summary: The Odoo database init/upgrade job failed in {{ $ns }}
+        - alert: DatabaseBackupMissing
+          expr: |
+            time() - kube_cronjob_status_last_successful_time{namespace="{{ $ns }}", cronjob="postgres-backup"} > 129600
+          labels: { severity: warning }
+          annotations:
+            summary: No successful database backup in the last 36 hours in {{ $ns }}
+{{- end }}

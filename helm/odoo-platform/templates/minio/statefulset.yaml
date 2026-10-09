@@ -1,0 +1,67 @@
+{{- if .Values.minio.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  labels:
+    {{- include "op.componentLabels" (list . "minio") | nindent 4 }}
+spec:
+  serviceName: minio
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "op.selector" (list . "minio") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "op.componentLabels" (list . "minio") | nindent 8 }}
+    spec:
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: minio
+          image: {{ .Values.minio.image }}
+          args: ["server", "/data", "--address", ":9000", "--console-address", ":9001"]
+          ports:
+            - name: api
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          env:
+            {{- include "op.secretEnv" (list "MINIO_ROOT_USER" "minio-root-user" .) | nindent 12 }}
+            {{- include "op.secretEnv" (list "MINIO_ROOT_PASSWORD" "minio-root-password" .) | nindent 12 }}
+            - name: MINIO_REGION
+              value: {{ .Values.minio.region }}
+            # Lets Prometheus scrape /minio/v2/metrics/* without a bearer token
+            - name: MINIO_PROMETHEUS_AUTH_TYPE
+              value: public
+            {{- if .Values.minio.console.ingress }}
+            - name: MINIO_BROWSER_REDIRECT_URL
+              value: https://{{ .Values.domains.minioConsole }}
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: /minio/health/ready, port: api }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /minio/health/live, port: api }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.minio.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.minio.storage }}
+{{- end }}
