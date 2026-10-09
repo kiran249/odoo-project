@@ -1,0 +1,28 @@
+{{- if .Values.keycloak.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak
+  labels:
+    {{- include "op.componentLabels" (list . "keycloak") | nindent 4 }}
+  {{- include "op.ingressAnnotations" (list . (dict
+      "alb.ingress.kubernetes.io/healthcheck-port" "9000"
+      "alb.ingress.kubernetes.io/healthcheck-path" "/health/ready")) | nindent 2 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    - hosts: [{{ .Values.domains.keycloak | quote }}]
+  {{- end }}
+  rules:
+    - host: {{ .Values.domains.keycloak | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  name: http
+{{- end }}

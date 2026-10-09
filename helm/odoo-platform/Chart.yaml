@@ -1,0 +1,6 @@
+apiVersion: v2
+name: odoo-platform
+description: Odoo 18 with PostgreSQL, MinIO and Keycloak, wired into Prometheus/Grafana
+type: application
+version: 0.1.0
+appVersion: "18.0"

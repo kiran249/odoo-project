@@ -1,0 +1,32 @@
+# Dev: everything in-cluster, single replicas, small volumes.
+domains:
+  odoo: odoo-dev.example.com
+  keycloak: auth-dev.example.com
+  minioConsole: minio-dev.example.com
+
+ingress:
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/group.name: odoo-platform-dev
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:111122223333:certificate/REPLACE-ME
+
+postgres:
+  storage: 10Gi
+  backup:
+    retentionDays: 3
+
+minio:
+  storage: 20Gi
+
+keycloak:
+  grafanaUrl: https://grafana.example.com
+
+odoo:
+  replicas: 1
+  workers: 2
+  resources:
+    requests: { cpu: 250m, memory: 1Gi }
+    limits: { memory: 2Gi }

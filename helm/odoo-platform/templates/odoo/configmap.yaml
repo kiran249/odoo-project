@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: odoo-config
+  labels:
+    {{- include "op.componentLabels" (list . "odoo") | nindent 4 }}
+data:
+  # admin_passwd is appended at container start from the secret;
+  # the database password is passed through PGPASSWORD.
+  odoo.conf: |
+    [options]
+    addons_path = /mnt/extra-addons,/mnt/oca-addons
+    data_dir = /var/lib/odoo
+    db_host = {{ include "op.dbHost" . }}
+    db_port = {{ include "op.dbPort" . }}
+    db_user = {{ .Values.databases.odoo.user }}
+    db_name = {{ .Values.databases.odoo.name }}
+    dbfilter = ^{{ .Values.databases.odoo.name }}$
+    list_db = False
+    proxy_mode = True
+    workers = {{ .Values.odoo.workers }}
+    max_cron_threads = {{ .Values.odoo.maxCronThreads }}
+    http_port = 8069
+    gevent_port = 8072
+    {{- .Values.odoo.extraConfig | nindent 4 }}

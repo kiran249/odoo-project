@@ -1,0 +1,9 @@
+# Used by the Probe resources in the app chart (Odoo / Keycloak health checks)
+config:
+  modules:
+    http_2xx:
+      prober: http
+      timeout: 10s
+      http:
+        valid_status_codes: [200]
+        preferred_ip_protocol: ip4

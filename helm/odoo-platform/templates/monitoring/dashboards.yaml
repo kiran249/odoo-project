@@ -1,0 +1,15 @@
+{{- if .Values.monitoring.enabled }}
+# Picked up by the Grafana dashboard sidecar (label grafana_dashboard=1)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-odoo-platform
+  labels:
+    {{- include "op.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: Odoo Platform
+data:
+  odoo-platform.json: |-
+    {{- .Files.Get "files/dashboards/odoo-platform.json" | nindent 4 }}
+{{- end }}

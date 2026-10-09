@@ -1,0 +1,13 @@
+# Applied once per cluster by the pipeline. Requires the Amazon EBS CSI driver
+# add-on (aws-ebs-csi-driver) with an IAM role allowed to manage volumes.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Retain

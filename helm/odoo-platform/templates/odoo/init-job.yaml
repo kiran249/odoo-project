@@ -1,0 +1,77 @@
+# Runs after the first install and before every upgrade (so the database is
+# migrated before new pods roll out): creates the database on first deploy,
+# installs missing modules, upgrades the requested ones and applies the
+# Keycloak/MinIO configuration. See docker/odoo/scripts/init-db.sh.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: odoo-init
+  labels:
+    {{- include "op.componentLabels" (list . "odoo-init") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 3600
+  template:
+    metadata:
+      labels:
+        {{- include "op.componentLabels" (list . "odoo-init") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 101
+      initContainers:
+        {{- include "op.odooConfigInit" . | nindent 8 }}
+      containers:
+        - name: init
+          image: "{{ .Values.odoo.image.repository }}:{{ .Values.odoo.image.tag }}"
+          imagePullPolicy: {{ .Values.odoo.image.pullPolicy }}
+          command: ["/usr/local/bin/odoo-platform/init-db.sh"]
+          env:
+            {{- include "op.odooEnv" . | nindent 12 }}
+            - name: ODOO_RC
+              value: /etc/odoo/odoo.conf
+            - name: ODOO_DB_NAME
+              value: {{ .Values.databases.odoo.name }}
+            - name: ODOO_INSTALL_MODULES
+              value: {{ .Values.odoo.init.installModules | quote }}
+            - name: ODOO_UPDATE_MODULES
+              value: {{ .Values.odoo.init.updateModules | quote }}
+            - name: ODOO_BASE_URL
+              value: https://{{ .Values.domains.odoo }}
+            - name: MINIO_BUCKETS
+              value: "{{ .Values.odoo.s3.bucket }}{{ if .Values.postgres.backup.enabled }},{{ .Values.postgres.backup.bucket }}{{ end }}"
+            {{- if .Values.keycloak.enabled }}
+            - name: KEYCLOAK_PUBLIC_URL
+              value: https://{{ .Values.domains.keycloak }}
+            - name: KEYCLOAK_INTERNAL_URL
+              value: {{ include "op.keycloakInternalUrl" . }}
+            - name: KEYCLOAK_REALM
+              value: {{ .Values.keycloak.realm }}
+            - name: OIDC_CLIENT_ID
+              value: {{ .Values.odoo.oidc.clientId }}
+            - name: OIDC_BUTTON_LABEL
+              value: {{ .Values.odoo.oidc.buttonLabel | quote }}
+            - name: OIDC_SIGNUP_SCOPE
+              value: {{ .Values.odoo.oidc.signupScope }}
+            {{- include "op.secretEnv" (list "OIDC_CLIENT_SECRET" "odoo-oidc-client-secret" .) | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.odoo.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/odoo
+            - name: data
+              mountPath: /var/lib/odoo
+      volumes:
+        - name: config-template
+          configMap:
+            name: odoo-config
+        - name: config
+          emptyDir: {}
+        # Files written during install are moved to MinIO by configure.py
+        - name: data
+          emptyDir: {}

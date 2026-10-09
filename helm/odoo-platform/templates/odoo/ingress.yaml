@@ -1,0 +1,36 @@
+{{- $extra := dict "alb.ingress.kubernetes.io/healthcheck-path" "/web/health" }}
+{{- if .Values.odoo.stickySessions }}
+{{- $_ := set $extra "alb.ingress.kubernetes.io/target-group-attributes" "stickiness.enabled=true,stickiness.lb_cookie.duration_seconds=86400" }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: odoo
+  labels:
+    {{- include "op.componentLabels" (list . "odoo") | nindent 4 }}
+  {{- include "op.ingressAnnotations" (list . $extra) | nindent 2 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    - hosts: [{{ .Values.domains.odoo | quote }}]
+  {{- end }}
+  rules:
+    - host: {{ .Values.domains.odoo | quote }}
+      http:
+        paths:
+          # Real-time bus (chat, notifications) is served by the gevent worker
+          - path: /websocket
+            pathType: Prefix
+            backend:
+              service:
+                name: odoo
+                port:
+                  name: websocket
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: odoo
+                port:
+                  name: http

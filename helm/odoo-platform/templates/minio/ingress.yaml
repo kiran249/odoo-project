@@ -1,0 +1,26 @@
+{{- if and .Values.minio.enabled .Values.minio.console.ingress }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: minio-console
+  labels:
+    {{- include "op.componentLabels" (list . "minio") | nindent 4 }}
+  {{- include "op.ingressAnnotations" (list . (dict "alb.ingress.kubernetes.io/healthcheck-path" "/")) | nindent 2 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    - hosts: [{{ .Values.domains.minioConsole | quote }}]
+  {{- end }}
+  rules:
+    - host: {{ .Values.domains.minioConsole | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minio
+                port:
+                  name: console
+{{- end }}

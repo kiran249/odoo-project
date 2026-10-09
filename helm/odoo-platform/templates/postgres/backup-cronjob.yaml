@@ -1,0 +1,59 @@
+{{- if and .Values.postgres.enabled .Values.postgres.backup.enabled }}
+# Nightly pg_dump of the Odoo and Keycloak databases, uploaded to MinIO/S3.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  labels:
+    {{- include "op.componentLabels" (list . "backup") | nindent 4 }}
+spec:
+  schedule: {{ .Values.postgres.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            {{- include "op.componentLabels" (list . "backup") | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: backup
+              # The Odoo image ships pg_dump and boto3
+              image: "{{ .Values.odoo.image.repository }}:{{ .Values.odoo.image.tag }}"
+              command: ["python3", "/usr/local/bin/odoo-platform/backup.py"]
+              env:
+                - name: LC_ALL
+                  value: C.UTF-8
+                - name: PGHOST
+                  value: {{ include "op.dbHost" . }}
+                - name: PGPORT
+                  value: {{ include "op.dbPort" . | quote }}
+                - name: PGUSER
+                  value: postgres
+                {{- include "op.secretEnv" (list "PGPASSWORD" "postgres-password" .) | nindent 16 }}
+                - name: BACKUP_DATABASES
+                  value: "{{ .Values.databases.odoo.name }},{{ .Values.databases.keycloak.name }}"
+                - name: BACKUP_BUCKET
+                  value: {{ .Values.postgres.backup.bucket }}
+                - name: BACKUP_RETENTION_DAYS
+                  value: {{ .Values.postgres.backup.retentionDays | quote }}
+                - name: MINIO_ENDPOINT
+                  value: {{ include "op.s3Endpoint" . }}
+                - name: MINIO_REGION
+                  value: {{ .Values.minio.region }}
+                {{- include "op.secretEnv" (list "MINIO_ACCESS_KEY" "minio-root-user" .) | nindent 16 }}
+                {{- include "op.secretEnv" (list "MINIO_SECRET_KEY" "minio-root-password" .) | nindent 16 }}
+              resources:
+                requests: { cpu: 100m, memory: 256Mi }
+                limits: { memory: 1Gi }
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}
+{{- end }}

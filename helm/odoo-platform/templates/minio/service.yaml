@@ -1,0 +1,18 @@
+{{- if .Values.minio.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  labels:
+    {{- include "op.componentLabels" (list . "minio") | nindent 4 }}
+spec:
+  selector:
+    {{- include "op.selector" (list . "minio") | nindent 4 }}
+  ports:
+    - name: api
+      port: 9000
+      targetPort: api
+    - name: console
+      port: 9001
+      targetPort: console
+{{- end }}

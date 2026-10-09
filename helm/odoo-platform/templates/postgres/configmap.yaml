@@ -1,0 +1,22 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-config
+  labels:
+    {{- include "op.componentLabels" (list . "postgres") | nindent 4 }}
+data:
+  platform.conf: |
+    {{- .Values.postgres.config | nindent 4 }}
+  # Runs once, when the data directory is first initialised.
+  10-create-roles.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres \
+      -v odoo_pw="$ODOO_DB_PASSWORD" -v keycloak_pw="$KEYCLOAK_DB_PASSWORD" <<'SQL'
+    CREATE ROLE "{{ .Values.databases.odoo.user }}" LOGIN CREATEDB PASSWORD :'odoo_pw';
+    CREATE ROLE "{{ .Values.databases.keycloak.user }}" LOGIN PASSWORD :'keycloak_pw';
+    CREATE DATABASE "{{ .Values.databases.keycloak.name }}" OWNER "{{ .Values.databases.keycloak.user }}";
+    SQL
+    echo "include_dir = '/etc/postgresql/conf.d'" >> "$PGDATA/postgresql.conf"
+{{- end }}

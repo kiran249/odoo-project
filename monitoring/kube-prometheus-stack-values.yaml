@@ -1,0 +1,111 @@
+# Cluster-wide monitoring (installed once, shared by every environment).
+# Release name must stay "kube-prometheus-stack" (the app chart's labels match it).
+
+prometheus:
+  prometheusSpec:
+    # Pick up ServiceMonitors/Probes/Rules from every namespace and release
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    retention: 15d
+    resources:
+      requests: { cpu: 500m, memory: 2Gi }
+      limits: { memory: 4Gi }
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 50Gi
+
+alertmanager:
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+  # Add receivers (Slack, email, PagerDuty) here, e.g.:
+  # config:
+  #   route: { receiver: slack, group_by: [alertname, namespace] }
+  #   receivers:
+  #     - name: slack
+  #       slack_configs: [{ api_url: https://hooks.slack.com/..., channel: "#alerts" }]
+
+grafana:
+  # admin credentials come from the "grafana-admin" secret (scripts/create-secrets.sh)
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  persistence:
+    enabled: true
+    storageClassName: gp3
+    size: 5Gi
+  ingress:
+    enabled: true
+    ingressClassName: alb
+    annotations:
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
+      alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+      alb.ingress.kubernetes.io/ssl-redirect: "443"
+      alb.ingress.kubernetes.io/healthcheck-path: /api/health
+      alb.ingress.kubernetes.io/group.name: monitoring
+      alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:111122223333:certificate/REPLACE-ME
+    hosts: [grafana.example.com]
+    tls:
+      - hosts: [grafana.example.com]
+  envFromSecrets:
+    - name: grafana-oidc   # provides GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET
+  grafana.ini:
+    server:
+      root_url: https://grafana.example.com
+    # Single sign-on with Keycloak (realm "odoo", client "grafana").
+    # Realm roles grafana-admin / grafana-editor map to Grafana roles.
+    auth.generic_oauth:
+      enabled: true
+      name: Keycloak
+      allow_sign_up: true
+      client_id: grafana
+      scopes: openid email profile
+      auth_url: https://auth.example.com/realms/odoo/protocol/openid-connect/auth
+      token_url: http://keycloak.odoo-prod.svc.cluster.local:8080/realms/odoo/protocol/openid-connect/token
+      api_url: http://keycloak.odoo-prod.svc.cluster.local:8080/realms/odoo/protocol/openid-connect/userinfo
+      signout_redirect_url: https://auth.example.com/realms/odoo/protocol/openid-connect/logout?post_logout_redirect_uri=https%3A%2F%2Fgrafana.example.com%2Flogin
+      use_pkce: true
+      role_attribute_path: contains(roles[*], 'grafana-admin') && 'Admin' || contains(roles[*], 'grafana-editor') && 'Editor' || 'Viewer'
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: true
+  # Community dashboards, downloaded by Grafana on start. Without "revision"
+  # the chart fetches revision 1; set a newer revision you have checked exists.
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: community
+          folder: Odoo Platform
+          type: file
+          options:
+            path: /var/lib/grafana/dashboards/community
+  dashboards:
+    community:
+      postgresql:
+        gnetId: 9628
+        datasource: Prometheus
+      minio:
+        gnetId: 13502
+        datasource: Prometheus
