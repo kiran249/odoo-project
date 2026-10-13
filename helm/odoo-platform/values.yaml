@@ -1,7 +1,24 @@
 # Default values for odoo-platform. Per-environment overrides live in
 # environments/<env>/values.yaml at the repository root.
 
-# Public hostnames (DNS records must point at the ALB created by the ingresses)
+# How users reach the platform:
+#   address  No DNS names and no certificates. Everything is plain HTTP on the
+#            address AWS gives the load balancer, one port per component:
+#              http://<address>/        Odoo
+#              http://<address>:8080/   Keycloak
+#              http://<address>:9001/   MinIO console
+#            scripts/deploy-app.sh creates the load balancer first and sets
+#            access.address to its address.
+#   domains  One hostname per component (domains.*) over HTTPS, with an ACM
+#            certificate (ingress.certificateArn). DNS records must point at the ALB.
+access:
+  mode: address
+  address: ""
+  ports:
+    keycloak: 8080
+    minioConsole: 9001
+
+# Hostnames, used when access.mode=domains
 domains:
   odoo: odoo.example.com
   keycloak: auth.example.com
@@ -18,15 +35,13 @@ storageClass: gp3
 
 ingress:
   className: alb
-  # Shared by every ingress; all of them join the same ALB through group.name.
+  # Every ingress joins one ALB per namespace (group "<namespace>").
+  # Listen ports, HTTPS redirect and certificate are set from access.mode.
   annotations:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
-    alb.ingress.kubernetes.io/group.name: odoo-platform
-    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:REGION:ACCOUNT:certificate/ID
-  tls: true
+  # access.mode=domains only; empty = the ALB controller finds a certificate by hostname
+  certificateArn: ""
 
 monitoring:
   # Create ServiceMonitors / Probes / PrometheusRules / dashboards.
@@ -99,7 +114,8 @@ keycloak:
   resources:
     requests: { cpu: 250m, memory: 1Gi }
     limits: { memory: 2Gi }
-  # Hostname of Grafana, used for the "grafana" client redirect URI
+  # URL of Grafana, used for the "grafana" client redirect URI
+  # (in access.mode=address, scripts/deploy-app.sh sets it to Grafana's address)
   grafanaUrl: https://grafana.example.com
 
 # ---------------------------------------------------------------------------

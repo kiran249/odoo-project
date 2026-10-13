@@ -1,18 +1,14 @@
 # Prod: more replicas and resources. Consider moving PostgreSQL to Amazon RDS
 # (postgres.enabled=false + externalDatabase.host) and MinIO to Amazon S3.
+# access.mode (address | domains) comes from the Jenkins ACCESS_MODE parameter.
+# The domains and the certificate below are used only with ACCESS_MODE=domains.
 domains:
   odoo: odoo.example.com
   keycloak: auth.example.com
   minioConsole: minio.example.com
 
 ingress:
-  annotations:
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
-    alb.ingress.kubernetes.io/group.name: odoo-platform-prod
-    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:111122223333:certificate/REPLACE-ME
+  certificateArn: arn:aws:acm:us-east-1:111122223333:certificate/REPLACE-ME
 
 postgres:
   storage: 100Gi
@@ -34,7 +30,7 @@ minio:
 
 keycloak:
   replicas: 2
-  grafanaUrl: https://grafana.example.com
+  grafanaUrl: https://grafana.example.com   # domains mode only
 
 odoo:
   workers: 6

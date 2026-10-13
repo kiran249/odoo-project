@@ -7,16 +7,12 @@ metadata:
     {{- include "op.componentLabels" (list . "keycloak") | nindent 4 }}
   {{- include "op.ingressAnnotations" (list . (dict
       "alb.ingress.kubernetes.io/healthcheck-port" "9000"
-      "alb.ingress.kubernetes.io/healthcheck-path" "/health/ready")) | nindent 2 }}
+      "alb.ingress.kubernetes.io/healthcheck-path" "/health/ready") .Values.access.ports.keycloak) | nindent 2 }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
-  {{- if .Values.ingress.tls }}
-  tls:
-    - hosts: [{{ .Values.domains.keycloak | quote }}]
-  {{- end }}
+  {{- include "op.ingressTls" (list . .Values.domains.keycloak) | nindent 2 }}
   rules:
-    - host: {{ .Values.domains.keycloak | quote }}
-      http:
+    - http:
         paths:
           - path: /
             pathType: Prefix
@@ -25,4 +21,5 @@ spec:
                 name: keycloak
                 port:
                   name: http
+      {{- include "op.ingressHost" (list . .Values.domains.keycloak) | nindent 6 }}
 {{- end }}

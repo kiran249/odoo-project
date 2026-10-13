@@ -5,16 +5,12 @@ metadata:
   name: minio-console
   labels:
     {{- include "op.componentLabels" (list . "minio") | nindent 4 }}
-  {{- include "op.ingressAnnotations" (list . (dict "alb.ingress.kubernetes.io/healthcheck-path" "/")) | nindent 2 }}
+  {{- include "op.ingressAnnotations" (list . (dict "alb.ingress.kubernetes.io/healthcheck-path" "/") .Values.access.ports.minioConsole) | nindent 2 }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
-  {{- if .Values.ingress.tls }}
-  tls:
-    - hosts: [{{ .Values.domains.minioConsole | quote }}]
-  {{- end }}
+  {{- include "op.ingressTls" (list . .Values.domains.minioConsole) | nindent 2 }}
   rules:
-    - host: {{ .Values.domains.minioConsole | quote }}
-      http:
+    - http:
         paths:
           - path: /
             pathType: Prefix
@@ -23,4 +19,5 @@ spec:
                 name: minio
                 port:
                   name: console
+      {{- include "op.ingressHost" (list . .Values.domains.minioConsole) | nindent 6 }}
 {{- end }}

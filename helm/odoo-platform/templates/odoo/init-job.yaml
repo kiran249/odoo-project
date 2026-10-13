@@ -41,12 +41,12 @@ spec:
             - name: ODOO_UPDATE_MODULES
               value: {{ .Values.odoo.init.updateModules | quote }}
             - name: ODOO_BASE_URL
-              value: https://{{ .Values.domains.odoo }}
+              value: {{ include "op.odooUrl" . }}
             - name: MINIO_BUCKETS
               value: "{{ .Values.odoo.s3.bucket }}{{ if .Values.postgres.backup.enabled }},{{ .Values.postgres.backup.bucket }}{{ end }}"
             {{- if .Values.keycloak.enabled }}
             - name: KEYCLOAK_PUBLIC_URL
-              value: https://{{ .Values.domains.keycloak }}
+              value: {{ include "op.keycloakUrl" . }}
             - name: KEYCLOAK_INTERNAL_URL
               value: {{ include "op.keycloakInternalUrl" . }}
             - name: KEYCLOAK_REALM

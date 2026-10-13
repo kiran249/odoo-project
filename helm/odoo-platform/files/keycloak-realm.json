@@ -2,7 +2,7 @@
   "realm": "{{ .Values.keycloak.realm }}",
   "displayName": "Odoo Platform",
   "enabled": true,
-  "sslRequired": "external",
+  "sslRequired": "{{ if include "op.addressMode" . }}none{{ else }}external{{ end }}",
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
@@ -26,13 +26,13 @@
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
-      "rootUrl": "https://{{ .Values.domains.odoo }}",
+      "rootUrl": "{{ include "op.odooUrl" . }}",
       "baseUrl": "/web",
-      "redirectUris": ["https://{{ .Values.domains.odoo }}/auth_oauth/signin"],
-      "webOrigins": ["https://{{ .Values.domains.odoo }}"],
+      "redirectUris": ["{{ include "op.odooUrl" . }}/auth_oauth/signin"],
+      "webOrigins": ["{{ include "op.odooUrl" . }}"],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "https://{{ .Values.domains.odoo }}/*"
+        "post.logout.redirect.uris": "{{ include "op.odooUrl" . }}/*"
       }
     },
     {

@@ -56,12 +56,71 @@ http://keycloak.{{ .Release.Namespace }}.svc.cluster.local:8080
       key: {{ index . 1 }}
 {{- end }}
 
-{{/* op.ingressAnnotations <root> <extra annotations dict> */}}
+{{- define "op.addressMode" -}}
+{{- if eq .Values.access.mode "address" -}}true
+{{- else if ne .Values.access.mode "domains" -}}{{ fail "access.mode must be address or domains" }}
+{{- end -}}
+{{- end }}
+
+{{- define "op.address" -}}
+{{ required "access.address is required when access.mode=address (scripts/deploy-app.sh sets it)" .Values.access.address }}
+{{- end }}
+
+{{/* Public URLs, as browsers reach them */}}
+{{- define "op.odooUrl" -}}
+{{- if include "op.addressMode" . -}}
+http://{{ include "op.address" . }}
+{{- else -}}
+https://{{ .Values.domains.odoo }}
+{{- end -}}
+{{- end }}
+
+{{- define "op.keycloakUrl" -}}
+{{- if include "op.addressMode" . -}}
+http://{{ include "op.address" . }}:{{ .Values.access.ports.keycloak }}
+{{- else -}}
+https://{{ .Values.domains.keycloak }}
+{{- end -}}
+{{- end }}
+
+{{- define "op.minioConsoleUrl" -}}
+{{- if include "op.addressMode" . -}}
+http://{{ include "op.address" . }}:{{ .Values.access.ports.minioConsole }}
+{{- else -}}
+https://{{ .Values.domains.minioConsole }}
+{{- end -}}
+{{- end }}
+
+{{/* op.ingressAnnotations <root> <extra annotations dict> <port in address mode>
+     Values and extra annotations win over the computed ones. */}}
 {{- define "op.ingressAnnotations" -}}
-{{- $a := merge (dict) (default (dict) (index . 1)) (index . 0).Values.ingress.annotations -}}
-{{- with $a }}
+{{- $root := index . 0 -}}
+{{- $computed := dict "alb.ingress.kubernetes.io/group.name" $root.Release.Namespace -}}
+{{- if include "op.addressMode" $root -}}
+{{- $_ := set $computed "alb.ingress.kubernetes.io/listen-ports" (printf "[{\"HTTP\": %v}]" (index . 2)) -}}
+{{- else -}}
+{{- $_ := set $computed "alb.ingress.kubernetes.io/listen-ports" "[{\"HTTP\": 80}, {\"HTTPS\": 443}]" -}}
+{{- $_ := set $computed "alb.ingress.kubernetes.io/ssl-redirect" "443" -}}
+{{- with $root.Values.ingress.certificateArn }}
+{{- $_ := set $computed "alb.ingress.kubernetes.io/certificate-arn" . -}}
+{{- end -}}
+{{- end -}}
+{{- $a := merge (dict) (default (dict) (index . 1)) $root.Values.ingress.annotations $computed -}}
 annotations:
-  {{- toYaml . | nindent 2 }}
+  {{- toYaml $a | nindent 2 }}
+{{- end }}
+
+{{/* op.ingressTls / op.ingressHost <root> <hostname>: domains mode only */}}
+{{- define "op.ingressTls" -}}
+{{- if not (include "op.addressMode" (index . 0)) -}}
+tls:
+  - hosts: [{{ index . 1 | quote }}]
+{{- end }}
+{{- end }}
+
+{{- define "op.ingressHost" -}}
+{{- if not (include "op.addressMode" (index . 0)) -}}
+host: {{ index . 1 | quote }}
 {{- end }}
 {{- end }}
 

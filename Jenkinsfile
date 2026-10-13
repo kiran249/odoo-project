@@ -32,6 +32,7 @@ pipeline {
     parameters {
         choice(name: 'ENVIRONMENT', choices: ['dev', 'prod'], description: 'Target environment (namespace odoo-<env>)')
         choice(name: 'ACTION', choices: ['deploy', 'destroy'], description: 'destroy removes the release but keeps the volumes')
+        choice(name: 'ACCESS_MODE', choices: ['address', 'domains'], description: 'address = plain HTTP on the load balancer address, no DNS or certificate; domains = HTTPS on the hostnames in environments/<env>/values.yaml')
         string(name: 'AWS_REGION', defaultValue: 'us-east-1', description: 'Region of the EKS cluster and ECR')
         string(name: 'EKS_CLUSTER_NAME', defaultValue: 'my-eks-cluster', description: 'Existing EKS cluster name')
         string(name: 'ECR_REPOSITORY', defaultValue: 'odoo-platform/odoo', description: 'ECR repository for the Odoo image (created if missing)')
@@ -73,9 +74,11 @@ pipeline {
             steps {
                 sh '''
                     set -e
-                    helm lint helm/odoo-platform -f environments/${ENVIRONMENT}/values.yaml
+                    # access.address is only known at deploy time; any value renders
+                    access="--set-string access.mode=$ACCESS_MODE --set-string access.address=validate.invalid"
+                    helm lint helm/odoo-platform -f environments/${ENVIRONMENT}/values.yaml $access
                     helm template odoo-platform helm/odoo-platform \
-                        -n "$NAMESPACE" -f environments/${ENVIRONMENT}/values.yaml > /dev/null
+                        -n "$NAMESPACE" -f environments/${ENVIRONMENT}/values.yaml $access > /dev/null
                     for f in scripts/*.sh docker/odoo/scripts/init-db.sh; do bash -n "$f"; done
                 '''
             }
@@ -217,7 +220,11 @@ pipeline {
                     input message: "Uninstall odoo-platform from ${env.NAMESPACE}? (PVCs and the secret are kept)", ok: 'Destroy'
                 }
                 withAws {
-                    sh 'helm uninstall odoo-platform -n "$NAMESPACE" --wait || true'
+                    sh '''
+                        helm uninstall odoo-platform -n "$NAMESPACE" --wait || true
+                        # Deletes the ALB (address mode); the next deploy gets a new address
+                        kubectl -n "$NAMESPACE" delete ingress alb-address --ignore-not-found
+                    '''
                 }
             }
         }

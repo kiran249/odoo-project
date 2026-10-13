@@ -8,16 +8,12 @@ metadata:
   name: odoo
   labels:
     {{- include "op.componentLabels" (list . "odoo") | nindent 4 }}
-  {{- include "op.ingressAnnotations" (list . $extra) | nindent 2 }}
+  {{- include "op.ingressAnnotations" (list . $extra 80) | nindent 2 }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
-  {{- if .Values.ingress.tls }}
-  tls:
-    - hosts: [{{ .Values.domains.odoo | quote }}]
-  {{- end }}
+  {{- include "op.ingressTls" (list . .Values.domains.odoo) | nindent 2 }}
   rules:
-    - host: {{ .Values.domains.odoo | quote }}
-      http:
+    - http:
         paths:
           # Real-time bus (chat, notifications) is served by the gevent worker
           - path: /websocket
@@ -34,3 +30,4 @@ spec:
                 name: odoo
                 port:
                   name: http
+      {{- include "op.ingressHost" (list . .Values.domains.odoo) | nindent 6 }}

@@ -3,6 +3,17 @@
 Odoo 18 with PostgreSQL, MinIO, Keycloak, Prometheus and Grafana. Deployed
 to an existing EKS cluster by an existing Jenkins.
 
+Two ways to reach it, chosen with the Jenkins `ACCESS_MODE` parameter:
+
+| `ACCESS_MODE` | URLs | Needs |
+|---|---|---|
+| `address` (default) | Plain HTTP on the address AWS gives the load balancer:<br>`http://<alb>/` Odoo, `http://<alb>:8080/` Keycloak, `http://<alb>:9001/` MinIO console, `http://<grafana-alb>/` Grafana | Nothing: no DNS, no certificate |
+| `domains` | `https://odoo.example.com` and the other hostnames | DNS records and an ACM certificate |
+
+`<alb>` looks like `k8s-odoodev-1a2b3c4d5e-123456789.us-east-1.elb.amazonaws.com`.
+It is a name, not a fixed IP: AWS changes an ALB's IPs over time, so always use
+the name. The pipeline prints the URLs at the end of the *Deploy platform* stage.
+
 ```
                  ┌──────────── AWS ALB (AWS Load Balancer Controller) ────────────┐
                  │  odoo.example.com      auth.example.com      grafana.example.com │
@@ -37,9 +48,9 @@ docker/minio/                    MinIO built from source
 addons/                          your custom Odoo modules
 helm/odoo-platform/              chart for Postgres, MinIO, Keycloak, Odoo, monitoring resources
 environments/{dev,prod}/         per-environment values (domains, sizes, certificate)
-monitoring/                      kube-prometheus-stack + blackbox exporter values
+monitoring/                      kube-prometheus-stack + blackbox exporter values (-domains.yaml: HTTPS overlay)
 k8s/cluster/                     cluster-level objects (gp3 StorageClass)
-scripts/                         secrets, monitoring install, deploy, smoke test
+scripts/                         secrets, ALB address, monitoring install, deploy, Keycloak setup, smoke test
 ```
 
 ## Prerequisites
@@ -47,8 +58,8 @@ scripts/                         secrets, monitoring install, deploy, smoke test
 ### EKS cluster
 - **AWS Load Balancer Controller** installed (IngressClass `alb`).
 - **Amazon EBS CSI driver** add-on installed. The pipeline creates the `gp3` StorageClass.
-- An **ACM certificate** for your domains.
-- **DNS records** (Route 53 or external-dns) for the Odoo, Keycloak, MinIO console and Grafana hosts, pointing at the ALBs.
+- Public subnets tagged `kubernetes.io/role/elb=1`, so the controller can place internet-facing ALBs.
+- `ACCESS_MODE=domains` only: an **ACM certificate** for your domains, and **DNS records** (Route 53 or external-dns) for the Odoo, Keycloak, MinIO console and Grafana hosts, pointing at the ALBs.
 - Nodes with at least about 6 vCPU and 12 GiB free for dev. The `prod` values need more.
 
 ### Jenkins agent
@@ -60,18 +71,17 @@ scripts/                         secrets, monitoring install, deploy, smoke test
 
 ## First-time setup
 
-1. Edit `environments/dev/values.yaml` and `environments/prod/values.yaml`:
-   - set the domains and `alb.ingress.kubernetes.io/certificate-arn`
-   - set `keycloak.grafanaUrl`
-2. Edit `monitoring/kube-prometheus-stack-values.yaml`:
-   - Grafana host, certificate, and the Keycloak URLs in `auth.generic_oauth`. These point at the prod Keycloak by default.
-   - Alertmanager receivers (Slack, email, etc.).
+1. `ACCESS_MODE=domains` only (skip for `address`):
+   - In `environments/dev/values.yaml` and `environments/prod/values.yaml`, set the domains, `ingress.certificateArn` and `keycloak.grafanaUrl`.
+   - In `monitoring/kube-prometheus-stack-values-domains.yaml`, set the Grafana host, the certificate and the Keycloak hostname.
+2. Optional: Alertmanager receivers (Slack, email, etc.) in `monitoring/kube-prometheus-stack-values.yaml`.
 3. Create a Jenkins **Pipeline** job:
    - Definition: *Pipeline script from SCM*
    - Repository: this repo
    - Script path: `Jenkinsfile`
 4. Run it once with the default parameters. Jenkins only shows the parameter form from the second run on. Then run it with:
-   - `ENVIRONMENT=dev`
+   - `ENVIRONMENT=dev`, `ACCESS_MODE=address`
+   - `GRAFANA_SSO_ENV=dev` while only dev exists (Grafana's Keycloak login uses that environment's Keycloak; until it exists, log in to Grafana as `admin`)
    - `AWS_REGION`, `EKS_CLUSTER_NAME`
    - `AWS_CREDENTIALS_ID` (or leave it empty to use the agent's IAM role)
 
@@ -86,7 +96,7 @@ scripts/                         secrets, monitoring install, deploy, smoke test
 | Cluster prerequisites | Creates the gp3 StorageClass. Warns if the ALB controller or the EBS CSI driver is missing. |
 | Secrets | Runs `scripts/create-secrets.sh`, which creates the `odoo-platform-secrets` Secret (see below). |
 | Monitoring stack | Runs `scripts/install-monitoring.sh`, which installs `kube-prometheus-stack` and the blackbox exporter. |
-| Deploy platform | Runs `helm upgrade --install` of `helm/odoo-platform`. The `odoo-init` Job runs before every upgrade (details below). |
+| Deploy platform | Runs `scripts/deploy-app.sh`: `helm upgrade --install` of `helm/odoo-platform`. The `odoo-init` Job runs before every upgrade (details below). |
 | Smoke test | From inside an Odoo pod, checks the Odoo health endpoint and login page, the Keycloak OIDC discovery URL, and MinIO health. |
 
 **The `odoo-init` Job** (`docker/odoo/scripts/init-db.sh`):
@@ -95,7 +105,16 @@ scripts/                         secrets, monitoring install, deploy, smoke test
 - Every run, it configures the Keycloak provider, MinIO storage and `web.base.url`.
 - It is idempotent.
 
-`ACTION=destroy` uninstalls the release. The PVCs (data) and the Secret are kept.
+**Address mode.** Keycloak, Odoo and Grafana need their public URL before they start, so
+`scripts/ensure-alb.sh` first creates each ALB with a small `alb-address` ingress
+and waits for its address. The app's ingresses then join that ALB
+(`group.name` = namespace), one listener port per component, so the address stays
+the same on every deploy. After the deploy, `scripts/configure-keycloak.sh` allows
+plain HTTP in Keycloak (`sslRequired=none` in the `master` and `odoo` realms) and
+sets the Odoo and Grafana client redirect URIs to the current addresses.
+
+`ACTION=destroy` uninstalls the release and deletes the `alb-address` ingress (so the
+ALB goes away and the next deploy gets a new address). The PVCs (data) and the Secret are kept.
 
 ## Secrets
 
@@ -124,13 +143,18 @@ For production, consider AWS Secrets Manager with the External Secrets Operator 
 
 ## Logging in
 
+The URLs below are for `ACCESS_MODE=domains`. In `address` mode use the URLs the
+pipeline prints (or `kubectl -n odoo-dev get ingress`): Odoo on port 80, Keycloak on
+8080, MinIO console on 9001, Grafana on its own ALB. Plain HTTP sends passwords
+unencrypted, so use it for testing only.
+
 - **Odoo**: open `https://odoo.<domain>` and either:
   - click **Log in with Keycloak**, or
   - log in as `admin` with `odoo-admin-password`.
 
   By default (`odoo.oidc.signupScope: b2b`), only users you invite from Odoo can log in through Keycloak. Set `b2c` to let any realm user get a portal account.
 - **Keycloak admin**: `https://auth.<domain>/admin`, user `admin`. Create users in the `odoo` realm.
-- **Grafana**: `https://grafana.<domain>`. Log in through Keycloak. Realm roles `grafana-admin` and `grafana-editor` map to Grafana Admin and Editor; everyone else is a Viewer. The *Odoo Platform* dashboard is in the *Odoo Platform* folder.
+- **Grafana**: `https://grafana.<domain>`. Log in as `admin` (password in the `monitoring/grafana-admin` Secret) or through Keycloak. Realm roles `grafana-admin` and `grafana-editor` map to Grafana Admin and Editor; everyone else is a Viewer. The *Odoo Platform* dashboard is in the *Odoo Platform* folder.
 - **MinIO console**: `https://minio.<domain>` (dev only). In prod, use `kubectl -n odoo-prod port-forward svc/minio 9001`.
 
 ## Monitoring
@@ -178,6 +202,7 @@ Community dashboards for PostgreSQL (9628) and MinIO (13502) are added too.
 
   For Amazon S3, set `minio.enabled=false` and `odoo.s3.endpoint`, and put the access keys in `minio-root-user` and `minio-root-password`.
 - **Keycloak realm changes**: the realm is imported only when it doesn't exist yet. Make later changes in the Keycloak admin console.
+- **Moving from `address` to `domains`**: fill in the domains settings (see First-time setup) and run with `ACCESS_MODE=domains`. Then, in the Keycloak admin console, set the Odoo and Grafana clients' URLs to the new hostnames and set *Require SSL* back to *external requests* in the `master` and `odoo` realms.
 - **Version pins**:
   - OCA module commits: `docker/odoo/Dockerfile`
   - MinIO release: `MINIO_RELEASE` in `Jenkinsfile`
@@ -188,6 +213,7 @@ Community dashboards for PostgreSQL (9628) and MinIO (13502) are added too.
 
 ```bash
 aws eks update-kubeconfig --name <cluster> --region <region>
+export ACCESS_MODE=address   # or domains
 kubectl apply -f k8s/cluster/storageclass-gp3.yaml
 scripts/create-secrets.sh odoo-dev
 GRAFANA_SSO_NAMESPACE=odoo-dev scripts/install-monitoring.sh

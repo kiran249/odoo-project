@@ -28,7 +28,7 @@ spec:
               containerPort: 9000
           env:
             - name: KC_HOSTNAME
-              value: https://{{ .Values.domains.keycloak }}
+              value: {{ include "op.keycloakUrl" . }}
             # Lets in-cluster clients (Odoo, Grafana) use the Service URL for
             # token/JWKS calls while tokens keep the public issuer.
             - name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC
